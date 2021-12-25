@@ -7,19 +7,20 @@ gi.require_version('Keybinder', '3.0')
 from gi.repository import Keybinder, GLib
 
 from dbus.mainloop.glib import DBusGMainLoop
-from command import default_hud_menu
-from command import rofi_hud_menu
-from command import global_hud_menu
 
-from utils.menu import DbusMenu
+from fildem.command import default_hud_menu, rofi_hud_menu, global_hud_menu
+from fildem.utils.menu import DbusMenu
+from fildem.utils.wayland import is_wayland
 
 
 def run_keybinder(callback):
 	# for wayland
 	DBusGMainLoop(set_as_default=True)
 	dbus_menu = DbusMenu()
-	Keybinder.bind('<Alt>space', callback, dbus_menu)
-	#GLib.timeout_add_seconds(1, callback)
+
+	if not is_wayland():
+		Keybinder.bind('<Alt>space', callback, dbus_menu)
+	# GLib.timeout_add_seconds(1, callback)
 	try:
 		GLib.MainLoop().run()
 	except KeyboardInterrupt:

@@ -1,18 +1,15 @@
-import gi
 import dbus
-import time
 
 from gi.repository import GLib
 
-from utils.fuzzy import match_replace
-from utils.global_keybinder import GlobalKeybinder
-from utils.window import WindowManager
-from utils.service import MyService
+from fildem.utils.global_keybinder import GlobalKeybinder
+from fildem.utils.window import WindowManager
+from fildem.utils.service import MyService
 
-from handlers.default import HudMenu
-from handlers.global_menu import GlobalMenu
+from fildem.handlers.default import HudMenu
+from fildem.handlers.global_menu import GlobalMenu
 
-from menu_model.menu_model import DbusGtkMenu, DbusAppMenu
+from fildem.menu_model.menu_model import MenuModel
 
 
 class DbusMenu:
@@ -25,15 +22,15 @@ class DbusMenu:
 		self.tries = 0
 		self.retry_timer_id = 0
 		self.collect_timer = 0
+		self._menu_model = None
+
 		self._init_window()
 		self._listen_menu_activated()
 		self._listen_hud_activated()
-		self._width_offset = 300
 		WindowManager.add_listener(self.on_window_switched)
 
 	def _init_window(self):
-		self.appmenu = DbusAppMenu(self.session, self.window)
-		self.gtkmenu = DbusGtkMenu(self.session, self.window)
+		self._menu_model = MenuModel(self.session, self.window)
 		self._update()
 
 	def on_window_switched(self, window):
@@ -51,11 +48,11 @@ class DbusMenu:
 			GLib.source_remove(self.collect_timer)
 
 	def _listen_menu_activated(self):
-		proxy  = self.session.get_object(MyService.BUS_NAME, MyService.BUS_PATH)
+		proxy = self.session.get_object(MyService.BUS_NAME, MyService.BUS_PATH)
 		signal = proxy.connect_to_signal("MenuActivated", self.on_menu_activated)
 
 	def _listen_hud_activated(self):
-		proxy  = self.session.get_object(MyService.BUS_NAME, MyService.BUS_PATH)
+		proxy = self.session.get_object(MyService.BUS_NAME, MyService.BUS_PATH)
 		signal = proxy.connect_to_signal("HudActivated", self.on_hud_activated)
 
 	def on_menu_activated(self, menu: str, x: int):
@@ -64,8 +61,9 @@ class DbusMenu:
 			return
 
 		if x != -1:
-			self._width_offset = x
-		self._start_app(menu)
+			self._start_app(menu, x)
+		else:
+			self._start_app(menu)
 
 	def on_hud_activated(self):
 		menu = HudMenu(self)
@@ -79,11 +77,11 @@ class DbusMenu:
 		if self.app is None:
 			return
 
-		self.app.move_window(x) 
+		self.app.move_window(x)
 
-	def _start_app(self, menu_activated: str):
+	def _start_app(self, menu_activated: str, offset=300):
 		if self.app is None:
-			self.app = GlobalMenu(self, menu_activated, self._width_offset)
+			self.app = GlobalMenu(self, menu_activated, offset)
 			self.app.connect('shutdown', self.on_app_shutdown)
 			self.app.run()
 
@@ -110,39 +108,25 @@ class DbusMenu:
 	def _retry_init(self):
 		self.retry_timer_id = 0
 		self._init_window()
+		return False
 
-	def _add_retry(self):
-		N = 2 # Amount of tries
-		if self.tries < N and not len(self.items):
+	def _update_menus(self):
+		self._menu_model._update_menus()
+
+		max_tries = 2
+		if self.tries < max_tries and self.tree.root is None:
 			self.tries += 1
 			self.retry_timer_id = GLib.timeout_add_seconds(2, self._retry_init)
 
-	def collect_entries(self):
-		def collect():
-			self.collect_timer = 0
-			self.gtkmenu.collect_entries()
-			self.appmenu.collect_entries()
-
-		self.collect_timer = GLib.timeout_add(200, collect)
-
 	def _update(self):
-		self.gtkmenu.get_results()
-		top_level_menus = self.gtkmenu.get_top_level_menus()
-		if not len(top_level_menus):
-			self.appmenu.get_results()
-			top_level_menus = self.appmenu.get_top_level_menus()
-
-		if not len(top_level_menus):
-			self._add_retry()
-		else:
-			self.collect_entries()
-		self._send_msg(top_level_menus)
-		self._handle_shortcuts(top_level_menus)
+		self._update_menus()
+		self._handle_shortcuts(self._menu_model.top_level_menus)
+		self._send_msg(self._menu_model.top_level_menus)
 
 	def _send_msg(self, top_level_menus):
 		if len(top_level_menus) == 0:
 			top_level_menus = dbus.Array(signature="s")
-		proxy  = self.session.get_object(MyService.BUS_NAME, MyService.BUS_PATH)
+		proxy = self.session.get_object(MyService.BUS_NAME, MyService.BUS_PATH)
 		proxy.EchoSendTopLevelMenus(top_level_menus)
 
 	@property
@@ -151,40 +135,14 @@ class DbusMenu:
 
 	@property
 	def actions(self):
-		actions = self.gtkmenu.actions
-		if not len(actions):
-			actions = self.appmenu.actions
-
-		self.handle_empty(actions)
-
-		return actions.keys()
+		return self._menu_model.actions
 
 	def accel(self):
-		accel = self.gtkmenu.accels
-		if not len(accel):
-			accel = self.appmenu.accels
-		return accel
+		return self._menu_model.accel
 
 	@property
-	def items(self):
-		items = self.appmenu.items
-		if not len(items):
-			items = self.gtkmenu.items
-		return items
+	def tree(self):
+		return self._menu_model.tree
 
 	def activate(self, selection):
-		if selection in self.gtkmenu.actions:
-			self.gtkmenu.activate(selection)
-
-		elif selection in self.appmenu.actions:
-			self.appmenu.activate(selection)
-
-	def handle_empty(self, actions):
-		if not len(actions):
-			alert = 'No menu items available!'
-			promt = ''
-			try:
-				promt = self.prompt
-			except Exception as e:
-				pass
-			print('Gnome HUD: WARNING: (%s) %s' % (promt, alert))
+		self._menu_model.activate(selection)

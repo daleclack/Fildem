@@ -4,7 +4,8 @@ import os
 
 from gi.repository import Gio
 
-from utils.service import MyService
+from fildem.utils.service import MyService
+from fildem.utils.wayland import is_wayland
 
 '''
 Everything in this file is due to Wayland compatibility due to Bamf.
@@ -13,9 +14,10 @@ Its replacement is the gnome extension
 '''
 # if there’s a problem, maybe try this
 # loginctl show-session $(loginctl | grep $(whoami) | awk '{print $1}') -p Type
-backend = os.environ['XDG_SESSION_TYPE']
+# 'Wayland' means nothing, what matters is if it is x11 or not
+wayland = is_wayland()
 
-if backend == 'x11':
+if not wayland:
 	gi.require_version('Bamf', '3')
 	from gi.repository import Bamf
 
@@ -46,7 +48,7 @@ class Window(object):
 		self.props[key] = value
 
 	def get_app_name(self):
-		if backend == 'x11':
+		if not wayland:
 			return WindowManager.get_app_name()
 		elif 'appName' in self.props:
 			return self.props['appName']
@@ -106,7 +108,7 @@ class WindowManager(object):
 
 	@classmethod
 	def _start_listener(cls):
-		if backend == 'x11':
+		if not wayland:
 			cls._get_matcher().connect('active-window-changed', cls._window_switched_bamf)
 		else:
 			session = dbus.SessionBus()
@@ -121,7 +123,7 @@ class WindowManager(object):
 
 	@classmethod
 	def new_window(cls, win_data={}):
-		if backend == 'x11':
+		if not wayland:
 			return Window(cls._get_matcher().get_active_window())
 
 		# Wayland

@@ -8,6 +8,8 @@ from gi.repository import Gtk
 from gi.repository import Gdk
 from gi.repository import Gio
 
+from fildem.utils.wayland import is_wayland
+
 
 def get_separator():
 	return u'\u0020\u0020\u00BB\u0020\u0020'
@@ -34,54 +36,40 @@ def parse_accel(accel: str):
 
 class Menu(Gtk.Menu):
 
-	def __init__(self, menus, depth, accel_group, activate_callback=None, *args, **kwargs):
+	def __init__(self, tree, node, accel_group, activate_callback=None, *args, **kwargs):
 		"""
-		menus: Gtk.Menu
-		depth: int
-			equals to len(item.path) (path doesn’t include the label)
+		tree: Tree
+		node: Node
 		accel_group: Gtk.AccelGroup
 		activate_callback: Callable[[str], None]
 			If None the action `'app.' + item.action` is used on the MenuItem
 		"""
 		super(Gtk.Menu, self).__init__(*args, **kwargs)
 		self.accel_group = accel_group
-		self.depth = depth
 		self.callback = activate_callback
-		self.add_items(menus)
+		self.tree = tree
+		self.node = node
+		self.add_items(tree, node)
 		self.show_all()
 
-	def add_items(self, menus):
-		i = 0
+	def add_items(self, tree, node):
 		current_section = None
-		while i < len(menus):
-			item = menus[i]
+		for c in tree.children(node.identifier):
+			# Separator for Gtk apps
+			if current_section is not None and c.data.section != current_section:
+				self.append(Gtk.SeparatorMenuItem())
+			current_section = c.data.section
 
-			if len(item.path) == self.depth:
-				# Separator
-				if (item.section is not None and current_section is not None
-						and item.section == (current_section[0], current_section[1] + 1)):
-					self.append(Gtk.SeparatorMenuItem())
-				current_section = item.section
-				
-				# item
-				menu_item = self._create_item(item)
+			if c.is_leaf():
+				menu_item = self._create_item(c.data)
 			else:
-				# sub_menu
-				current_prefix = item.path[self.depth]
-				current_menu = []
-				while i < len(menus) and len(menus[i].path) > self.depth and menus[i].path[self.depth] == current_prefix:
-					current_menu.append(menus[i])
-					i += 1
-
-				i -= 1
-				menu_item = self._create_sub_menu(current_menu)
-				menu_item.set_label(item.path[self.depth])
+				menu_item = self._create_sub_menu(c)
+				menu_item.set_label(c.tag)
 
 			self.append(menu_item)
-			i += 1
 
-	def _create_sub_menu(self, menu):
-		menu = Menu(menu, self.depth + 1, self.accel_group, self.callback)
+	def _create_sub_menu(self, node):
+		menu = Menu(self.tree, node, self.accel_group, self.callback)
 		menu_item = Gtk.MenuItem()
 		menu_item.set_submenu(menu)
 		menu_item.set_use_underline(True)
@@ -126,6 +114,8 @@ class Menu(Gtk.Menu):
 
 class CommandWindow(Gtk.ApplicationWindow):
 
+	wayland = is_wayland()
+
 	def __init__(self, *args, **kwargs):
 		kwargs['type'] = Gtk.WindowType.POPUP
 		super(Gtk.ApplicationWindow, self).__init__(*args, **kwargs)
@@ -143,6 +133,8 @@ class CommandWindow(Gtk.ApplicationWindow):
 		self.set_skip_pager_hint(True)
 		self.set_skip_taskbar_hint(True)
 		self.set_destroy_with_parent(True)
+
+		self.set_decorated(False)
 
 		self.my_menu_bar = Gtk.MenuBar()
 		self.accel_group = Gtk.AccelGroup()
@@ -179,34 +171,18 @@ class CommandWindow(Gtk.ApplicationWindow):
 				self.open_menu_shortcut(menu)
 				break
 
-	def set_menu(self, menus):
+	def set_tree_menu(self, tree):
 		self.destroy_menus()
-		if len(menus) == 0:
-			return
-		current_prefix = menus[0].path[0]
-		current_menu = []
-		for item in menus:
-			if item.path[0] == current_prefix:
-				current_menu.append(item)
-			else:
-				self.create_menu(current_prefix, current_menu)
-				current_menu = [ item ]
-				current_prefix = item.path[0]
-		else:
-			self.create_menu(current_prefix, current_menu)
-
-	def create_menu(self, name, current_menu):
-		if len(current_menu) == 0:
-			return
-		menu = Menu(current_menu, 1, self.accel_group)
-		menu.show_all()
-		button = Gtk.MenuItem()
-		button.set_label(name)
-		button.set_use_underline(True)
-		button.set_submenu(menu) # set_popup(menu)
-		button.show_all()
-		button.set_can_focus(True)
-		self.my_menu_bar.append(button)
+		children = tree.children(tree[tree.root].identifier)
+		for c in children:
+			menu = Menu(tree, c, self.accel_group)
+			button = Gtk.MenuItem()
+			button.set_label(c.tag)
+			button.set_use_underline(True)
+			button.set_submenu(menu) # set_popup(menu)
+			button.show_all()
+			button.set_can_focus(True)
+			self.my_menu_bar.append(button)
 
 	def destroy_menus(self):
 		self.main_box.remove(self.my_menu_bar)
@@ -244,10 +220,16 @@ class CommandWindow(Gtk.ApplicationWindow):
 		inject_custom_style(self, styles)
 
 	def grab_keyboard(self, window, status=Gdk.GrabStatus.SUCCESS):
+		if self.wayland:
+			return
+
 		while self.seat.grab(window, Gdk.SeatCapabilities.KEYBOARD, False, None, None, None) != status:
 			time.sleep(0.1)
 
 	def ungrab_keyboard(self):
+		if self.wayland:
+			return
+
 		self.seat.ungrab()
 
 	def emulate_focus_out_event(self):
@@ -326,10 +308,10 @@ class GlobalMenu(Gtk.Application):
 		self.window.connect('focus-out-event', self.on_hide_window)
 
 	def add_menus(self):
-		ac = self.dbus_menu.actions
-		for item in self.dbus_menu.items:
-			self.add_menu_action(item)
-		self.window.set_menu(self.dbus_menu.items)
+		for item in self.dbus_menu.tree.leaves():
+			self.add_menu_action(item.data)
+
+		self.window.set_tree_menu(self.dbus_menu.tree)
 		self.window.show_all()
 
 	def add_menu_action(self, item):

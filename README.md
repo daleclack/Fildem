@@ -6,29 +6,29 @@
 
 ![Fildem](https://user-images.githubusercontent.com/19943481/95288612-1d272a80-083f-11eb-9400-be88f61e054d.png)
 
-This project is a fork of gnomehud with the adition of a global menu bar. To install it you have to download this repo and install the extension copying/moving the `fildemGMenu@gonza.com` folder into `~/.local/share/gnome-shell/extensions`. Then, you have to run the app with `./run.sh`.
+This project is a fork of gnomehud with the adition of a global menu bar. It’s consist of a Gnome Shell extension and a external program, you must install both for the application to work.
 
-You can also bring a HUD menu with Alt + Space.
+You can also bring a HUD menu with Alt + Space (on Xorg).
 
 This is a prototype, as I don’t know if people will like or how much it will last until devs nuke it, so fell free to let me know your opinion.
 
-## installation
+## Installation
 
-### Ubuntu 20
+### Extension
 
-You can install the modules with
+To install the extension, download it from the [Gnome extensions website](https://extensions.gnome.org/extension/4114/fildem-global-menu/).
 
-```
-sudo apt install libbamf3-dev bamfdaemon libkeybinder-3.0-dev appmenu-gtk2-module appmenu-gtk3-module unity-gtk-module-common
-```
+### Ubuntu
 
-And install the python dependency:
+Download the .deb file from the releases section and run `sudo apt install ./fildem_*.deb`
 
-```
-pip3 install fuzzysearch
-```
+### Arch
 
-And then configure the following files:
+Download the .zst file from the releases section and run `sudo pacman -U ./python3-fildem*.zst`
+
+## Configuration
+
+In order for the application to work, you must configure the following files (aplies to all operating systems):
 
 - Create the file `~/.gtkrc-2.0` and append `gtk-modules="appmenu-gtk-module"`
 - The file `~/.config/gtk-3.0/settings.ini` should have the line `gtk-modules="appmenu-gtk-module"` under [Settings]. If it doesn’t exist create it and paste the following
@@ -38,15 +38,9 @@ And then configure the following files:
 gtk-modules="appmenu-gtk-module"
 ```
 
-### Arch
+## Running
 
-I got it to run on a vm, since Arch is so customizable I can’t guaranted it will work on all system, but the modules installed were
-
-```
-pacman -S bamf appmenu-gtk-module libkeybinder3 libdbusmenu-gtk2 libdbusmenu-gtk3 libdbusmenu-qt5
-```
-
-You also have to install `fuzzysearch` with pip (`pip3 install fuzzysearch`) and edit the files explained on the Ubuntu section.
+After installation you’ll have two executables, `fildem` and `fildem-hud`.  To check if it works use the first one. `fildem-hud` is for using he HUD, if you are on Xorg, you already have it bound to Alt + Space. If you are on Wayland, you can bind some keybinding to that command.
 
 ## Customization
 
@@ -60,7 +54,11 @@ The AppMenu button shows the application name or window title (if you have some 
 
 ### Reduce space between buttons
 
-If the menu shown on the panel is shifted with relation to the one that appears, you can tweak the padding in the preferences window of the extension.
+If the menu shown on the panel is shifted with relation to the one that appears, like this:
+
+![Screenshot from 2021-06-17 11-09-00](https://user-images.githubusercontent.com/864630/122452193-da852880-cf5d-11eb-8ca8-27e481ab682c.png)
+
+you can tweak the "Button padding" in the preferences window of the extension (accessible from the tweak tool).
 
 ### Remove space in between buttons
 

@@ -224,7 +224,7 @@ class MenuButton extends PanelMenu.Button {
 		super._onStyleChanged(actor);
 		let padding = this._menuBar.extension.settings.get_int('min-padding');
 		this._minHPadding = padding;
-		this._natHPadding = padding * 2 + 2;
+		this._natHPadding = padding;
 	}
 
 	onButtonEvent(actor, event) {
@@ -235,6 +235,42 @@ class MenuButton extends PanelMenu.Button {
 		return Clutter.EVENT_STOP;
 	}
 });
+
+const Cache = class Cache {
+	constructor() {
+		this.N = 10;
+		this.lru = [];
+		this.entries = {};
+		this.lastQueriedKey = '';
+	}
+
+	get(key) {
+		this.lastQueriedKey = key;
+		return this.entries[key];
+	}
+
+	_set(key, value) {
+		if (this.entries[key]) {
+			const oldItem = this.lru.splice(this.lru.indexOf(key), 1);
+		}
+		this.lru.push(key);
+		this.entries[key] = value;
+
+		if (this.lru.length > this.N) {
+			const toRemove = this.lru.pop();
+			this.entries[toRemove] = undefined;
+		}
+	}
+
+	withCache(f) {
+		const self = this;
+		const g = (param) => {
+			self._set(self.lastQueriedKey, param);
+			f(param);
+		}
+		return g;
+	}
+}
 
 /**
  * This is a manager not a container
@@ -249,8 +285,10 @@ const MenuBar = class MenuBar {
 		this.MARGIN_FIRST_ELEMENT = 4;
 		this._isShowingMenu = false;
 
+		this._cache = new Cache();
+
 		this._notifyFocusWinId = global.display.connect('notify::focus-window', this._onWindowSwitched.bind(this));
-		this._proxy.listeners['SendTopLevelMenus'].push(this.setMenus.bind(this));
+		this._proxy.listeners['SendTopLevelMenus'].push(this._cache.withCache(this.setMenus.bind(this)));
 		this._proxy.listeners['MenuOnOff'].push(this._onMenuOnOff.bind(this));
 		Main.panel.reactive = true;
 		Main.panel.track_hover = true;
@@ -259,10 +297,10 @@ const MenuBar = class MenuBar {
 		this._forceShowMenu = false;
 		this._showAppMenuButton = false;
 		this.setForceShowMenu();
-		this.setHideAppMenuButton()
+		this.setHideAppMenuButton();
 
-		Main.overview.connect('showing', this._onOverviewOpened.bind(this))
-		Main.overview.connect('hiding', this._onOverviewClosed.bind(this))
+		Main.overview.connect('showing', this._onOverviewOpened.bind(this));
+		Main.overview.connect('hiding', this._onOverviewClosed.bind(this));
 	}
 
 	setForceShowMenu() {
@@ -331,7 +369,12 @@ const MenuBar = class MenuBar {
 		let width = 0;
 		for (let el of Main.panel._leftBox.get_children()) {
 			let firstChild = el.get_first_child();
+			if (firstChild === this._menuButtons[0]) {
+				this._width_offset = width;
+				break;
+			}
 			if (firstChild.constructor.name == 'AppMenuButton') {
+				// [Deprecated]
 				this._appMenuButton = firstChild;
 				let label = firstChild._label;
 
@@ -339,7 +382,7 @@ const MenuBar = class MenuBar {
 					label.hide();
 				}
 				this._width_offset = width + el.width;
-				break;
+				// break;
 			}
 			if (el.is_visible()) {
 				width += el.get_width();
@@ -403,12 +446,21 @@ const MenuBar = class MenuBar {
 	_onWindowSwitched() {
 		this.removeAll();
 		this._restoreLabel();
+		this._hideMenu();
 		const overview = Main.overview.visibleTarget;
 		const focusApp = WinTracker.focus_app || Main.panel.statusArea.appMenu._targetApp;
 		if (focusApp) {
 			let windowData = {};
 			// TODO does the window matter?
 			let win = focusApp.get_windows()[0];
+			let appId = focusApp.get_id(); // *.desktop			
+
+			// Check cache
+			let cachedValue = this._cache.get(appId);
+			if (cachedValue) {
+				this.setMenus(cachedValue);
+			}
+
 			// global.log(`app id: ${focusApp.get_id()} win id: ${win.get_id()}`);
 			// TODO check pixel-saver extension for others way of obtaining xid
 			let xid = '';
@@ -430,7 +482,7 @@ const MenuBar = class MenuBar {
 	}
 
 	_onOverviewClosed() {
-		if (this._forceShowMenu) {
+		if (this._forceShowMenu && this._menuButtons.length) {
 			this._hideAppMenuButton();
 			this._showMenu();
 		}
@@ -448,6 +500,7 @@ const MenuBar = class MenuBar {
 	destroy() {
 		this._disconnectAll();
 		this.removeAll();
+		this._restoreLabel();
 	}
 };
 
